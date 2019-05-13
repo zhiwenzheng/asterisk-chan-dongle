@@ -381,6 +381,44 @@ ssize_t just_copy (const char* in, size_t in_length, char* out, size_t out_size)
 	return -ENOMEM;
 }
 
+static ssize_t ucs2_to_utf8 (const char* in, size_t in_length, char* out, size_t out_size)
+{
+	ssize_t	res;
+
+	if (out_size - 1 < in_length / 2)
+	{
+		return -1;
+	}
+
+	/* Since UTF-16BE is a superset of UCS-2BE -- using unused code
+	 * points from UCS-2 -- we can safely assume that UTF-16BE works
+	 * here. */
+	res = convert_string (in, in_length, out, out_size, "UTF-16BE", "UTF-8");
+
+	return res;
+}
+
+static ssize_t utf8_to_ucs2 (const char* in, size_t in_length, char* out, size_t out_size)
+{
+	ssize_t	res;
+
+	if (out_size - 1 < in_length * 4)
+	{
+		return -1;
+	}
+
+	/* Since UTF-16BE is a superset of UCS-2BE -- using unused code
+	 * points from UCS-2 -- we can safely assume that UTF-16BE works
+	 * here. */
+	res = convert_string (in, in_length, out, out_size, "UTF-8", "UTF-16BE");
+	if (res < 0)
+	{
+		return res;
+	}
+
+	return res;
+}
+
 typedef ssize_t (*coder) (const char* in, size_t in_length, char* out, size_t out_size);
 
 /* array in order of values RECODE_* */
@@ -396,6 +434,7 @@ static const coder recoders[STR_ENCODING_UNKNOWN][2] =
 	[STR_ENCODING_7BIT_HEX_PAD_4] = { hexstr_7bit_to_char_pad_4, char_to_hexstr_7bit_pad_4 },
 	[STR_ENCODING_7BIT_HEX_PAD_5] = { hexstr_7bit_to_char_pad_5, char_to_hexstr_7bit_pad_5 },
 	[STR_ENCODING_7BIT_HEX_PAD_6] = { hexstr_7bit_to_char_pad_6, char_to_hexstr_7bit_pad_6 },
+    [STR_ENCODING_UCS2] = { ucs2_to_utf8, utf8_to_ucs2 },
 };
 
 #/* */

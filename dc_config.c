@@ -226,6 +226,10 @@ EXPORT_DEF void dc_sconfig_fill(struct ast_config * cfg, const char * cat, struc
 				config->mindtmfduration = DEFAULT_MINDTMFINTERVAL;
 			}
 		}
+		else if (!strcasecmp (v->name, "cdma"))
+		{
+			config->cdma = ast_true (v->value);
+		}
 	}
 }
 

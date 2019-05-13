@@ -63,7 +63,8 @@ static int at_fill_generic_cmd_va (at_queue_cmd_t * cmd, const char * format, va
  * \return 0 on success
  */
 
-static int __attribute__ ((format(printf, 2, 3))) at_fill_generic_cmd (at_queue_cmd_t * cmd, const char * format, ...)
+static int __attribute__ ((format(printf, 2, 3)))
+at_fill_generic_cmd (at_queue_cmd_t * cmd, const char * format, ...)
 {
 	va_list ap;
 	int rv;
@@ -84,7 +85,8 @@ static int __attribute__ ((format(printf, 2, 3))) at_fill_generic_cmd (at_queue_
  * \return 0 on success
  */
 
-static int __attribute__ ((format(printf, 4, 5))) at_enque_generic (struct cpvt* cpvt, at_cmd_t cmd, int prio, const char * format, ...)
+static int __attribute__ ((format(printf, 4, 5)))
+at_enque_generic (struct cpvt* cpvt, at_cmd_t cmd, int prio, const char * format, ...)
 {
 	va_list ap;
 	int rv;
@@ -99,13 +101,8 @@ static int __attribute__ ((format(printf, 4, 5))) at_enque_generic (struct cpvt*
 	return rv;
 }
 
-/*!
- * \brief Enque initialization commands
- * \param cpvt -- cpvt structure
- * \param from_command -- begin initialization from this command in list
- * \return 0 on success
- */
-EXPORT_DEF int at_enque_initialization(struct cpvt* cpvt, at_cmd_t from_command)
+
+static int at_enque_init_gsm(struct cpvt* cpvt, at_cmd_t from_command)
 {
 	static const char cmd2[] = "ATZ\r";
 	static const char cmd3[] = "ATE0\r";
@@ -223,6 +220,148 @@ failure:
 	return err;
 }
 
+static int at_enque_init_cdma(struct cpvt* cpvt, at_cmd_t from_command)
+{
+	static const char cmd2[] = "ATZ\r";
+	static const char cmd3[] = "ATE0\r";
+
+	static const char cmd5[] = "AT+CGMI\r";
+	static const char cmd7[] = "AT+CGMM\r";
+	static const char cmd8[] = "AT+CGMR\r";
+
+	static const char cmd9[] = "AT+CMEE=0\r";
+	static const char cmd10[] = "AT+CGSN\r";
+	static const char cmd12[] = "AT+CPIN?\r";
+
+	static const char cmd17[] = "AT^CVOICE?\r";
+
+	static const char cmd22[] = "AT+CPMS=\"SM\",\"SM\",\"SM\"\r";
+	static const char cmd23[] = "AT+CNMI=1,1,0,0,0\r";
+	static const char cmd24[] = "AT+CSQ\r";
+
+	static const at_queue_cmd_t st_cmds[] = {
+		ATQ_CMD_DECLARE_ST(CMD_AT, cmd_at),
+		ATQ_CMD_DECLARE_ST(CMD_AT_Z, cmd2),		/* optional,  reload configuration */
+		ATQ_CMD_DECLARE_ST(CMD_AT_E, cmd3),		/* disable echo */
+		ATQ_CMD_DECLARE_DYN(CMD_AT_U2DIAG),		/* optional, Enable or disable some devices */
+		ATQ_CMD_DECLARE_ST(CMD_AT_CGMI, cmd5),		/* Getting manufacturer info */
+
+		ATQ_CMD_DECLARE_ST(CMD_AT_CGMM, cmd7),		/* Get Product name */
+		ATQ_CMD_DECLARE_ST(CMD_AT_CGMR, cmd8),		/* Get software version */
+
+        /* 
+         * set MS Error Report to 'ERROR' only
+         * TODO: change to 1 or 2 and add support in response handlers
+         */
+		ATQ_CMD_DECLARE_ST(CMD_AT_CMEE, cmd9),		
+
+		ATQ_CMD_DECLARE_ST(CMD_AT_CGSN, cmd10),		/* IMEI Read */
+
+        /*
+         * check is password authentication requirement
+         * and the remainder validation times
+         */
+		ATQ_CMD_DECLARE_ST(CMD_AT_CPIN, cmd12),
+
+        /* 
+         * read the current voice mode,
+         * and return sampling rate、data bit、frame period
+         */
+		ATQ_CMD_DECLARE_ST(CMD_AT_CVOICE, cmd17),	
+
+		ATQ_CMD_DECLARE_DYN(CMD_AT_CMGF),		/* Set Message Format */
+
+		ATQ_CMD_DECLARE_ST(CMD_AT_CPMS, cmd22),		/* SMS Storage Selection */
+
+        /*
+         * pvt->initialized = 1 after successful of CMD_AT_CNMI
+         *
+         * New SMS Notification Setting
+         * +CNMI=[<mode>[,<mt>[,<bm>[,<ds>[,<bfr>]]]]]
+         */
+		ATQ_CMD_DECLARE_ST(CMD_AT_CNMI, cmd23),		
+
+        /*
+         * Query Signal quality
+         */
+		ATQ_CMD_DECLARE_ST(CMD_AT_CSQ, cmd24),		
+		};
+
+	unsigned in, out;
+	int begin = -1;
+	int err;
+	char * ptmp1 = NULL;
+	char * ptmp2 = NULL;
+	pvt_t * pvt = cpvt->pvt;
+	at_queue_cmd_t cmds[ITEMS_OF(st_cmds)];
+
+    pvt->gsm_reg_status = 1;
+    pvt->gsm_registered = 1;
+
+	/* customize list */
+	for(in = out = 0; in < ITEMS_OF(st_cmds); in++)
+	{
+		if(begin == -1)
+		{
+			if(st_cmds[in].cmd == from_command)
+				begin = in;
+			else
+				continue;
+		}
+
+		if(st_cmds[in].cmd == CMD_AT_Z && !CONF_SHARED(pvt, resetdongle))
+			continue;
+		if(st_cmds[in].cmd == CMD_AT_U2DIAG && CONF_SHARED(pvt, u2diag) == -1)
+			continue;
+
+		memcpy(&cmds[out], &st_cmds[in], sizeof(st_cmds[in]));
+
+		if(cmds[out].cmd == CMD_AT_U2DIAG)
+		{
+			err = at_fill_generic_cmd(&cmds[out], "AT^U2DIAG=%d\r", CONF_SHARED(pvt, u2diag));
+			if(err)
+				goto failure;
+			ptmp1 = cmds[out].data;
+		}
+		else if(cmds[out].cmd == CMD_AT_CMGF)
+		{
+			err = at_fill_generic_cmd(&cmds[out], "AT+CMGF=%d\r", CONF_SHARED(pvt, smsaspdu) ? 0 : 1);
+			if(err)
+				goto failure;
+			ptmp2 = cmds[out].data;
+		}
+		if(cmds[out].cmd == from_command)
+			begin = out;
+		out++;
+	}
+
+	if(out > 0)
+		return at_queue_insert(cpvt, cmds, out, 0);
+	return 0;
+failure:
+	if(ptmp1)
+		ast_free(ptmp1);
+	if(ptmp2)
+		ast_free(ptmp2);
+	return err;
+}
+
+/*!
+ * \brief Enque initialization commands
+ * \param cpvt -- cpvt structure
+ * \param from_command -- begin initialization from this command in list
+ * \return 0 on success
+ */
+EXPORT_DEF int at_enque_initialization(struct cpvt* cpvt, at_cmd_t from_command)
+{
+	pvt_t * pvt = cpvt->pvt;
+
+    if (CONF_SHARED(pvt, cdma))
+        return at_enque_init_cdma(cpvt, from_command);
+    else
+        return at_enque_init_gsm(cpvt, from_command);
+}
+
 /*!
  * \brief Enque the AT+COPS? command
  * \param cpvt -- cpvt structure
@@ -284,14 +423,8 @@ EXPORT_DEF int at_enque_pdu(struct cpvt * cpvt, const char * pdu, attribute_unus
 	return at_queue_insert_task(cpvt, at_cmd, ITEMS_OF(at_cmd), 0, (struct at_queue_task **)id);
 }
 
-/*!
- * \brief Enque an SMS message
- * \param cpvt -- cpvt structure
- * \param number -- the destination of the message
- * \param msg -- utf-8 encoded message
- */
-
-EXPORT_DEF int at_enque_sms (struct cpvt* cpvt, const char* destination, const char* msg, unsigned validity_minutes, int report_req, void ** id)
+static int at_enque_sms_gsm (struct cpvt* cpvt, const char* destination, const char* msg,
+        unsigned validity_minutes, int report_req, void ** id)
 {
 	ssize_t res;
 	char buf[1024] = "AT+CMGS=\"";
@@ -392,6 +525,99 @@ EXPORT_DEF int at_enque_sms (struct cpvt* cpvt, const char* destination, const c
 	}
 
 	return at_queue_insert_task(cpvt, at_cmd, ITEMS_OF(at_cmd), 0, (struct at_queue_task **)id);
+}
+
+static int at_enque_sms_cdma (struct cpvt* cpvt, const char* destination, const char* msg, void ** id)
+{
+	ssize_t res;
+	char buf[1024] = "AT^HCMGS=\"";
+	char pdu_buf[2048];
+	pvt_t* pvt = cpvt->pvt;
+
+	at_queue_cmd_t at_cmd[] = {
+        { CMD_AT_HSMSSS,  RES_OK,         ATQ_CMD_FLAG_DEFAULT, { ATQ_CMD_TIMEOUT_MEDIUM, 0}, NULL, 0 },
+		{ CMD_AT_HCMGS,   RES_SMS_PROMPT, ATQ_CMD_FLAG_DEFAULT, { ATQ_CMD_TIMEOUT_MEDIUM, 0}, NULL, 0 },
+		{ CMD_AT_SMSTEXT, RES_OK,         ATQ_CMD_FLAG_DEFAULT, { ATQ_CMD_TIMEOUT_LONG, 0},   NULL, 0 }
+	};
+
+    /*
+     * AT^HSMSSS
+     */
+    at_cmd[0].data = ast_strdup("AT^HSMSSS=0,0,6,0\r");
+    at_cmd[0].length = strlen(at_cmd[0].data);
+
+    /*
+     * AT^HCMGS
+     */
+    at_cmd[1].length = 10;
+
+    res = str_recode (RECODE_ENCODE, STR_ENCODING_7BIT, destination, strlen (destination),
+            buf + at_cmd[1].length, sizeof(buf) - at_cmd[1].length - 3);
+    if(res <= 0)
+    {
+        ast_log (LOG_ERROR, "[%s] Error converting SMS number to UCS-2\n", PVT_ID(pvt));
+        return -4;
+    }
+    at_cmd[1].length += res;
+    buf[at_cmd[1].length++] = '"';
+    buf[at_cmd[1].length++] = '\r';
+    buf[at_cmd[1].length] = '\0';
+
+    at_cmd[1].data = ast_malloc(at_cmd[1].length);
+	if(!at_cmd[1].data)
+		return -ENOMEM;
+    memcpy(at_cmd[1].data, buf, at_cmd[1].length);
+
+    /*
+     * message
+     */
+	res = strlen (msg);
+
+    if(res > 70)
+    {
+        ast_log (LOG_ERROR, "[%s] SMS message too long, 70 symbols max\n", PVT_ID(pvt));
+        return -4;
+    }
+
+    res = str_recode (RECODE_ENCODE, STR_ENCODING_UCS2, msg, res, pdu_buf, sizeof(pdu_buf) - 2);
+    if (res < 0)
+    {
+        ast_free (at_cmd[1].data);
+        ast_log (LOG_ERROR, "[%s] Error converting SMS to UCS-2: '%s'\n", PVT_ID(pvt), msg);
+        return -4;
+    }
+    pdu_buf[res++] = 0x0;
+    pdu_buf[res++] = 0x1a;
+    pdu_buf[res] = 0;
+    at_cmd[2].length = res;
+
+    at_cmd[2].data = ast_malloc(at_cmd[2].length);
+	if(!at_cmd[2].data)
+	{
+		ast_free(at_cmd[1].data);
+		return -ENOMEM;
+	}
+    memcpy(at_cmd[2].data, pdu_buf, at_cmd[2].length);
+
+	return at_queue_insert_task(cpvt, at_cmd, ITEMS_OF(at_cmd), 0, (struct at_queue_task **)id);
+}
+
+/*!
+ * \brief Enque an SMS message
+ * \param cpvt -- cpvt structure
+ * \param number -- the destination of the message
+ * \param msg -- utf-8 encoded message
+ */
+
+EXPORT_DEF int at_enque_sms (struct cpvt* cpvt, const char* destination, const char* msg,
+        unsigned validity_minutes, int report_req, void ** id)
+{
+	pvt_t* pvt = cpvt->pvt;
+
+    if (CONF_SHARED(pvt, cdma))
+        return at_enque_sms_cdma(cpvt, destination, msg, id);
+    else
+        return at_enque_sms_gsm(cpvt, destination, msg, validity_minutes, report_req, id);
 }
 
 /*!
@@ -569,14 +795,20 @@ EXPORT_DEF int at_enque_dial(struct cpvt* cpvt, const char * number, int clir)
 		cmdsno++;
 	}
 
-	err = at_fill_generic_cmd(&cmds[cmdsno], "ATD%s;\r", number);
+    if (CONF_SHARED(pvt, cdma))
+	    err = at_fill_generic_cmd(&cmds[cmdsno], "AT+CDV%s;\r", number);
+    else
+	    err = at_fill_generic_cmd(&cmds[cmdsno], "ATD%s;\r", number);
 	if(err)
 	{
 		ast_free(tmp);
 		return err;
 	}
 
-	ATQ_CMD_INIT_DYNI(cmds[cmdsno], CMD_AT_D);
+    if (CONF_SHARED(pvt, cdma))
+	    ATQ_CMD_INIT_DYNI(cmds[cmdsno], CMD_AT_CDV);
+    else
+	    ATQ_CMD_INIT_DYNI(cmds[cmdsno], CMD_AT_D);
 	cmdsno++;
 
 /* on failed ATD this up held call */
@@ -704,14 +936,7 @@ EXPORT_DEF int at_enque_user_cmd(struct cpvt* cpvt, const char * input)
 	return at_enque_generic(cpvt, CMD_USER, 1, "%s\r", input);
 }
 
-/*!
- * \brief Enque commands for reading SMS
- * \param cpvt -- cpvt structure
- * \param index -- index of message in store
- * \param delete -- if non-zero also enque commands for delete message in store after reading
- * \return 0 on success
- */
-EXPORT_DEF int at_enque_retrive_sms (struct cpvt* cpvt, int index, int delete)
+static int at_enque_retrive_sms_gsm (struct cpvt* cpvt, int index, int delete)
 {
 	int err;
 	at_queue_cmd_t cmds[] = {
@@ -741,16 +966,55 @@ EXPORT_DEF int at_enque_retrive_sms (struct cpvt* cpvt, int index, int delete)
 	return at_queue_insert (cpvt, cmds, cmdsno, 0);
 }
 
+static int at_enque_retrive_sms_cdma (struct cpvt* cpvt, int index, int delete)
+{
+	int err;
+	at_queue_cmd_t cmds[] = {
+		ATQ_CMD_DECLARE_DYN2(CMD_AT_HCMGR, RES_HCMGR),
+		ATQ_CMD_DECLARE_DYN(CMD_AT_CMGD)
+		};
+	unsigned cmdsno = ITEMS_OF (cmds);
+
+	err = at_fill_generic_cmd (&cmds[0], "AT^HCMGR=%d\r", index);
+	if (err)
+		return err;
+
+	if (delete)
+	{
+		err = at_fill_generic_cmd (&cmds[1], "AT+CMGD=%d\r\r", index);
+		if(err)
+		{
+			ast_free (cmds[0].data);
+			return err;
+		}
+	}
+	else
+	{
+		cmdsno--;
+	}
+
+	return at_queue_insert (cpvt, cmds, cmdsno, 0);
+}
+
 /*!
- * \brief Enque AT+CHLD1x or AT+CHUP hangup command
- * \param cpvt -- channel_pvt structure
- * \param call_idx -- call id
+ * \brief Enque commands for reading SMS
+ * \param cpvt -- cpvt structure
+ * \param index -- index of message in store
+ * \param delete -- if non-zero also enque commands for delete message in store after reading
  * \return 0 on success
  */
-
-EXPORT_DEF int at_enque_hangup (struct cpvt* cpvt, int call_idx)
+EXPORT_DEF int at_enque_retrive_sms (struct cpvt* cpvt, int index, int delete)
 {
+	struct pvt *pvt = cpvt->pvt;
 
+    if (CONF_SHARED(pvt, cdma))
+        return at_enque_retrive_sms_cdma(cpvt, index, delete);
+    else
+        return at_enque_retrive_sms_gsm(cpvt, index, delete);
+}
+
+static int at_enque_hangup_gsm (struct cpvt* cpvt, int call_idx)
+{
 /*
 	this try of hangup non-active (held) channel as workaround for HW BUG 2
 
@@ -852,6 +1116,54 @@ EXPORT_DEF int at_enque_hangup (struct cpvt* cpvt, int call_idx)
 		pvt->last_dialed_cpvt = 0;
 
 	return at_queue_insert(cpvt, cmds, ITEMS_OF(cmds), 1);
+}
+
+static int at_enque_hangup_cdma (struct cpvt* cpvt, int call_idx)
+{
+	const char cmd_chv[] = "AT+CHV\r";
+
+	struct pvt* pvt = cpvt->pvt;
+	int err;
+	at_queue_cmd_t cmds[] = {
+		ATQ_CMD_DECLARE_ST(CMD_AT_CHV, cmd_chv),
+		ATQ_CMD_DECLARE_ST(CMD_AT_CLCC, cmd_clcc),
+		};
+
+	if(cpvt == &pvt->sys_chan || cpvt->dir == CALL_DIR_INCOMING
+            || (cpvt->state != CALL_STATE_INIT && cpvt->state != CALL_STATE_DIALING))
+	{
+		/* FIXME: other channels may be in RELEASED or INIT state */
+		if(PVT_STATE(pvt, chansno) > 1)
+		{
+			cmds[0].cmd = CMD_AT_CHLD_1x;
+			err = at_fill_generic_cmd(&cmds[0], cmd_chld1x, call_idx);
+			if(err)
+				return err;
+		}
+	}
+
+	/* early AT+CHV before ^ORIG for outgoing call may not get ^CEND in future */
+	if(cpvt->state == CALL_STATE_INIT)
+		pvt->last_dialed_cpvt = 0;
+
+	return at_queue_insert(cpvt, cmds, ITEMS_OF(cmds), 1);
+}
+
+/*!
+ * \brief Enque AT+CHLD1x or AT+CHUP hangup command
+ * \param cpvt -- channel_pvt structure
+ * \param call_idx -- call id
+ * \return 0 on success
+ */
+
+EXPORT_DEF int at_enque_hangup (struct cpvt* cpvt, int call_idx)
+{
+	struct pvt* pvt = cpvt->pvt;
+
+    if (CONF_SHARED(pvt, cdma))
+        return at_enque_hangup_cdma(cpvt, call_idx);
+    else
+        return at_enque_hangup_gsm(cpvt, call_idx);
 }
 
 /*!

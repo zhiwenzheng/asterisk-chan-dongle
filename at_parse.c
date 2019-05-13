@@ -383,6 +383,59 @@ EXPORT_DEF const char * at_parse_cmgr(char ** str, size_t len, char * oa, size_t
 	return rv;
 }
 
+EXPORT_DEF const char * at_parse_hcmgr(char ** str, size_t len,
+                    char * oa, size_t oa_len, str_encoding_t * oa_enc,
+                    char ** msg, str_encoding_t * msg_enc, size_t *msg_len)
+{
+	const char* rv = "Can't parse ^HCMGR response line";
+	char delimiters[] = ",,,,,,,,,,,,,\n";
+	char * marks[STRLEN(delimiters)];
+	size_t length;
+    int enc = -1;
+
+	/* skip "^HCMGR:" */
+	*str += 7;
+	len -= 7;
+
+	/* skip leading spaces */
+	while(len > 0 && str[0][0] == ' ')
+	{
+		(*str)++;
+		len--;
+	}
+
+	unsigned count = mark_line(*str, delimiters, marks);
+	if(count == ITEMS_OF(marks))
+	{
+		length = marks[0] - *str;
+		if(oa_len < length)
+			return "Not enought space for store number";
+		*oa_enc = STR_ENCODING_7BIT;
+		marks[0][0] = '\0';
+		memcpy(oa, *str, length);
+
+        marks[8][0] = '\0';
+		enc = atoi(marks[7] + 1);
+        if (enc >= 0 && enc <= 5)
+            *msg_enc = STR_ENCODING_7BIT;
+        else if (enc == 6)
+            *msg_enc = STR_ENCODING_UCS2;
+        else
+            *msg_enc = STR_ENCODING_UNKNOWN;
+
+        marks[9][0] = '\0';
+        *msg_len = atoi(marks[8] + 1);
+
+		*msg = marks[13] + 1;
+
+		return NULL;
+	}
+	else if(count > 0)
+		*str = marks[count - 1];
+
+	return rv;
+}
+
 /*!
  * \brief Parse a +CMGS notification
  * \param str -- string to parse (null terminated)

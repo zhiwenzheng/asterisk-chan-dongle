@@ -29,6 +29,7 @@ typedef enum {
 	CMD_AT_CGSN,
 
 	CMD_AT_CHUP,
+        CMD_AT_CHV,
 	CMD_AT_CIMI,
 //	CMD_AT_CLIP,
 	CMD_AT_CLIR,
@@ -37,8 +38,11 @@ typedef enum {
 	CMD_AT_CMGD,
 	CMD_AT_CMGF,
 	CMD_AT_CMGR,
+        CMD_AT_HCMGR,
 
 	CMD_AT_CMGS,
+        CMD_AT_HSMSSS,
+        CMD_AT_HCMGS,
 	CMD_AT_SMSTEXT,
 	CMD_AT_CNMI,
 	CMD_AT_CNUM,
@@ -57,6 +61,7 @@ typedef enum {
 	CMD_AT_CUSD,
 	CMD_AT_CVOICE,
 	CMD_AT_D,
+	CMD_AT_CDV,
 
 	CMD_AT_DDSETEX,
 	CMD_AT_DTMF,
@@ -98,6 +103,7 @@ INLINE_DECL const char* at_cmd2str (at_cmd_t cmd)
 		"AT+CGSN",
 
 		"AT+CHUP",
+                "AT+CHV",
 		"AT+CIMI",
 //		"AT+CLIP",
 		"AT+CLIR",
@@ -106,8 +112,11 @@ INLINE_DECL const char* at_cmd2str (at_cmd_t cmd)
 		"AT+CMGD",
 		"AT+CMGF",
 		"AT+CMGR",
+                "AT^HCMGR",
 
 		"AT+CMGS",
+                "AT^HSMSSS",
+                "AT^HCMGS",
 		"SMSTEXT",
 		"AT+CNMI",
 		"AT+CNUM",
@@ -126,6 +135,7 @@ INLINE_DECL const char* at_cmd2str (at_cmd_t cmd)
 		"AT+CUSD",
 		"AT^CVOICE",
 		"ATD",
+		"AT+CDV",
 
 		"AT^DDSETEX",
 		"AT^DTMF",

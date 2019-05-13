@@ -158,7 +158,9 @@ EXPORT_DEF int at_read_result_iov (const char * dev, int * read_result, struct r
 
 				return iovcnt;
 			}
-			else if (rb_memcmp (rb, "\r\n+CSSU:", 8) == 0 || rb_memcmp (rb, "\r\n+CMS ERROR:", 13) == 0 ||  rb_memcmp (rb, "\r\n+CMGS:", 8) == 0)
+			else if (rb_memcmp (rb, "\r\n+CSSU:", 8) == 0
+                    || rb_memcmp (rb, "\r\n+CMS ERROR:", 13) == 0
+                    || rb_memcmp (rb, "\r\n+CMGS:", 8) == 0)
 			{
 				rb_read_upd (rb, 2);
 				return at_read_result_iov (dev, read_result, rb, iov);
@@ -168,7 +170,11 @@ EXPORT_DEF int at_read_result_iov (const char * dev, int * read_result, struct r
 				*read_result = 0;
 				return rb_read_n_iov (rb, iov, 2);
 			}
-			else if (rb_memcmp (rb, "+CMGR:", 6) == 0 || rb_memcmp (rb, "+CNUM:", 6) == 0 || rb_memcmp (rb, "ERROR+CNUM:", 11) == 0 || rb_memcmp (rb, "+CLCC:", 6) == 0)
+			else if (rb_memcmp (rb, "+CMGR:", 6) == 0
+                    || rb_memcmp (rb, "^HCMGR:", 7) == 0
+                    || rb_memcmp (rb, "+CNUM:", 6) == 0
+                    || rb_memcmp (rb, "ERROR+CNUM:", 11) == 0
+                    || rb_memcmp (rb, "+CLCC:", 6) == 0)
 			{
 				iovcnt = rb_read_until_mem_iov (rb, iov, "\n\r\nOK\r\n", 7);
 				if (iovcnt > 0)
@@ -217,6 +223,10 @@ EXPORT_DEF at_res_t at_read_result_classification (struct ringbuffer * rb, size_
 
 		case RES_CMGR:
 			len += 7;
+			break;
+
+		case RES_HCMGR:
+			len += 8;
 			break;
 
 		case RES_CSSI:

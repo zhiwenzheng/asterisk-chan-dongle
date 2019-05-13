@@ -1494,6 +1494,7 @@ static int pvt_reconfigure(struct pvt * pvt, const pvt_config_t * settings, rest
 			|| SCONFIG(settings, u2diag) != CONF_SHARED(pvt, u2diag)
 			|| SCONFIG(settings, resetdongle) != CONF_SHARED(pvt, resetdongle)
 			|| SCONFIG(settings, smsaspdu) != CONF_SHARED(pvt, smsaspdu)
+			|| SCONFIG(settings, cdma) != CONF_SHARED(pvt, cdma)
 			|| SCONFIG(settings, callwaiting) != CONF_SHARED(pvt, callwaiting))
 		{
 			/* TODO: schedule restart */

@@ -43,6 +43,7 @@ static const at_response_t at_responses_list[] = {
 	{ RES_CEND,"^CEND",DEF_STR("^CEND:") },
 
 	{ RES_CMGR, "+CMGR",DEF_STR("+CMGR:") },
+	{ RES_HCMGR, "^HCMGR",DEF_STR("^HCMGR:") },
 	{ RES_CMS_ERROR, "+CMS ERROR",DEF_STR("+CMS ERROR:") },
 	{ RES_CMTI, "+CMTI",DEF_STR("+CMTI:") },
 	{ RES_CNUM, "+CNUM",DEF_STR("+CNUM:") },		/* and "ERROR+CNUM:" */
@@ -86,7 +87,8 @@ static const at_response_t at_responses_list[] = {
 	};
 #undef DEF_STR
 
-EXPORT_DEF const at_responses_t at_responses = { at_responses_list, 2, ITEMS_OF(at_responses_list), RES_MIN, RES_MAX};
+EXPORT_DEF const at_responses_t at_responses = { at_responses_list, 2, ITEMS_OF(at_responses_list),
+                                RES_MIN, RES_MAX};
 
 /*!
  * \brief Get the string representation of the given AT response
@@ -205,6 +207,7 @@ static int at_response_ok (struct pvt* pvt, at_res_t res)
 				break;
 
 			case CMD_AT_D:
+            case CMD_AT_CDV:
 				pvt->dialing = 1;
 				if (task->cpvt != &pvt->sys_chan) {
 					pvt->last_dialed_cpvt = task->cpvt;
@@ -226,6 +229,7 @@ static int at_response_ok (struct pvt* pvt, at_res_t res)
 				pvt->dialing = 0;
 				pvt->cwaiting = 0;
 				break;
+
 			case CMD_AT_DDSETEX:
 				ast_debug (1, "[%s] %s sent successfully\n", PVT_ID(pvt), at_cmd2str (ecmd->cmd));
 				if (!pvt->initialized)
@@ -236,13 +240,23 @@ static int at_response_ok (struct pvt* pvt, at_res_t res)
 					manager_event_device_status(PVT_ID(pvt), "Initialize");
 				}
 				break;
+
 			case CMD_AT_CHUP:
 			case CMD_AT_CHLD_1x:
+			case CMD_AT_CHV:
 				CPVT_RESET_FLAGS(task->cpvt, CALL_FLAG_NEED_HANGUP);
 				ast_debug (1, "[%s] Successful hangup for call idx %d\n", PVT_ID(pvt), task->cpvt->call_idx);
 				break;
 
 			case CMD_AT_CMGS:
+				ast_debug (1, "[%s] Sending sms message in progress\n", PVT_ID(pvt));
+				break;
+
+            case CMD_AT_HSMSSS:
+				ast_debug (1, "[%s] Successfully set params for sms message\n", PVT_ID(pvt));
+				break;
+
+			case CMD_AT_HCMGS:
 				ast_debug (1, "[%s] Sending sms message in progress\n", PVT_ID(pvt));
 				break;
 
@@ -465,6 +479,7 @@ static int at_response_error (struct pvt* pvt, at_res_t res)
 				}
 				/* fall through */
 			case CMD_AT_D:
+			case CMD_AT_CDV:
 				ast_log (LOG_ERROR, "[%s] Dial failed\n", PVT_ID(pvt));
 				queue_control_channel (task->cpvt, AST_CONTROL_CONGESTION);
 				break;
@@ -475,6 +490,7 @@ static int at_response_error (struct pvt* pvt, at_res_t res)
 
 			case CMD_AT_CHUP:
 			case CMD_AT_CHLD_1x:
+			case CMD_AT_CHV:
 				ast_log (LOG_ERROR, "[%s] Error sending hangup for call idx %d\n", PVT_ID(pvt), task->cpvt->call_idx);
 				break;
 
@@ -491,6 +507,7 @@ static int at_response_error (struct pvt* pvt, at_res_t res)
 				break;
 
 			case CMD_AT_CMGS:
+			case CMD_AT_HCMGS:
 			case CMD_AT_SMSTEXT:
 				pvt->outgoing_sms = 0;
 				pvt_try_restate(pvt);
@@ -1297,6 +1314,120 @@ static int at_response_cmgr (struct pvt* pvt, const char * str, size_t len)
 }
 
 /*!
+ * \brief Handle ^HCMGR response
+ * \param pvt -- pvt structure
+ * \param str -- string containing response (null terminated)
+ * \param len -- string lenght
+ * \retval  0 success
+ * \retval -1 error
+ */
+
+static int at_response_hcmgr (struct pvt* pvt, const char * str, size_t len)
+{
+	char		oa[512] = "";
+	char*		msg = NULL;
+	str_encoding_t	oa_enc;
+	str_encoding_t	msg_enc;
+	const char*	err;
+	char*		err_pos;
+	char*		cmgr;
+	ssize_t		res;
+	char		sms_utf8_str[4096];
+	char*		number;
+	char		from_number_utf8_str[1024];
+	char		text_base64[16384];
+	size_t		msg_len;
+
+	const struct at_queue_cmd * ecmd = at_queue_head_cmd (pvt);
+
+	manager_event_message("DongleNewCMGR", PVT_ID(pvt), str);
+	if (ecmd)
+	{
+		if (ecmd->res == RES_HCMGR)
+		{
+			at_queue_handle_result (pvt, RES_HCMGR);
+			pvt->incoming_sms = 0;
+			pvt_try_restate(pvt);
+
+			cmgr = err_pos = ast_alloca (len);
+            memcpy(cmgr, str, len);
+			err = at_parse_hcmgr (&err_pos, len, oa, sizeof(oa), &oa_enc, &msg, &msg_enc, &msg_len); // YYY
+			cmgr = err_pos = ast_alloca (len);
+            memcpy(cmgr, str, len);
+			if (err == (void*)0x1) /* HACK! */
+			{
+				char buf[64];
+				int res = (int)(long)msg; /* HACK */
+				snprintf(buf, 64, "Delivered\r\nForeignID: %d", res);
+				manager_event_sent_notify(PVT_ID(pvt), "SMS", 0x0 /* task is popped */, buf);
+				return 0;
+			}
+			else if (err)
+			{
+				ast_log (LOG_WARNING, "[%s] Error parsing incoming message '%s' at position %d: %s\n",
+                        PVT_ID(pvt), str, (int)(err_pos - cmgr), err);
+				return 0;
+			}
+
+			ast_debug (1, "[%s] Successfully read SMS message, use_ucs2 %d, msg_enc %d\n",
+                    PVT_ID(pvt), pvt->use_ucs2_encoding, msg_enc);
+
+			/* decode number and message */
+			res = str_recode (RECODE_DECODE, oa_enc, oa, strlen(oa),
+                    from_number_utf8_str, sizeof (from_number_utf8_str));
+			if (res < 0)
+			{
+				ast_log (LOG_ERROR, "[%s] Error decode SMS originator address: '%s',message is '%s'\n",
+                        PVT_ID(pvt), oa, str);
+				number = oa;
+				return 0;
+			}
+			else
+				number = from_number_utf8_str;
+
+			res = str_recode (RECODE_DECODE, msg_enc, msg, msg_len, sms_utf8_str, sizeof (sms_utf8_str));
+			if (res < 0)
+			{
+				ast_log (LOG_ERROR, "[%s] Error decode SMS text '%s' from encoding %d, message is '%s'\n",
+                        PVT_ID(pvt), msg, msg_enc, str);
+				return 0;
+			}
+			else
+			{
+				msg = sms_utf8_str;
+				msg_len = res;
+			}
+
+			ast_verb (1, "[%s] Got SMS from %s: '%s'\n", PVT_ID(pvt), number, msg);
+			ast_base64encode (text_base64, (unsigned char*)msg, msg_len, sizeof(text_base64));
+
+			manager_event_new_sms(PVT_ID(pvt), number, msg);
+			manager_event_new_sms_base64(PVT_ID(pvt), number, text_base64);
+			{
+				channel_var_t vars[] =
+				{
+					{ "SMS", msg } ,
+					{ "SMS_BASE64", text_base64 },
+					{ "CMGR", (char *)str },
+					{ NULL, NULL },
+				};
+				start_local_channel (pvt, "sms", number, vars);
+			}
+		}
+		else
+		{
+			ast_log (LOG_ERROR, "[%s] Received '^HCMGR' when expecting '%s' response to '%s', ignoring\n",                      PVT_ID(pvt), at_res2str (ecmd->res), at_cmd2str (ecmd->cmd));
+		}
+	}
+	else
+	{
+		ast_log (LOG_WARNING, "[%s] Received unexpected '+CMGR'\n", PVT_ID(pvt));
+	}
+
+	return 0;
+}
+
+/*!
  * \brief Send an SMS message from the queue.
  * \param pvt -- pvt structure
  * \retval  0 success
@@ -1714,7 +1845,6 @@ int at_response (struct pvt* pvt, const struct iovec iov[2], int iovcnt, at_res_
 	size_t		len;
 	const struct at_queue_cmd*	ecmd = at_queue_head_cmd(pvt);
 
-
 	if(iov[0].iov_len + iov[1].iov_len > 0)
 	{
 		len = iov[0].iov_len + iov[1].iov_len - 1;
@@ -1820,6 +1950,9 @@ int at_response (struct pvt* pvt, const struct iovec iov[2], int iovcnt, at_res_
 			case RES_CMGR:
 				return at_response_cmgr (pvt, str, len);
 
+			case RES_HCMGR:
+				return at_response_hcmgr (pvt, str, len);
+
 			case RES_SMS_PROMPT:
 				return at_response_sms_prompt (pvt);
 
@@ -1827,6 +1960,7 @@ int at_response (struct pvt* pvt, const struct iovec iov[2], int iovcnt, at_res_
 				/* An error here is not fatal. Just keep going. */
 				at_response_cusd (pvt, str, len);
 				break;
+
 			case RES_CLCC:
 				return at_response_clcc (pvt, str);
 

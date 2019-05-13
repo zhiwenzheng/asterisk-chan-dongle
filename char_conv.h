@@ -23,7 +23,7 @@ typedef enum {
 	STR_ENCODING_7BIT_HEX_PAD_5,		/* 7bit encoding, 5 bits padding */
 	STR_ENCODING_7BIT_HEX_PAD_6,		/* 7bit encoding, 6 bits padding */
 //	STR_ENCODING_8BIT,			/* 8bit */
-//	STR_ENCODING_UCS2,			/* UCS2 */
+        STR_ENCODING_UCS2,			/* UCS2 */
 	STR_ENCODING_UNKNOWN,			/* still unknown */
 } str_encoding_t;
 

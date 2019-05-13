@@ -77,6 +77,7 @@ typedef struct dc_sconfig
 	unsigned int		resetdongle:1;			/*! 1 */
 	unsigned int		disablesms:1;			/*! 0 */
 	unsigned int		smsaspdu:1;			/*! 0 */
+	unsigned int		cdma:1;			        /*! 0 */
 	dev_state_t		initstate;			/*! DEV_STATE_STARTED */
 //	unsigned int		disable:1;			/*! 0 */
 
